@@ -1,5 +1,6 @@
 //-------------------------------------------------------------------------------------------------
 // Author: Ivan Zaitsev, ivan.zaitsev@gmail.com
+// Modified by: Jonatan R. Fischer, jonafischer@gmail.com
 //
 // This file follows the FreeRTOS distribution license.
 //
@@ -33,8 +34,15 @@
 //-------------------------------------------------------------------------------------------------
 
 //-------------------------------------------------------------------------------------------------
+// OS includes
+//-------------------------------------------------------------------------------------------------
+// FreeRTOS config include (to make assembler work with conditional compilation)
+#include "FreeRTOSConfig.h"
+
+//-------------------------------------------------------------------------------------------------
 // Hardware includes
 //-------------------------------------------------------------------------------------------------
+#include <stdint.h>
 
 //-------------------------------------------------------------------------------------------------
 // Type definitions.
@@ -62,10 +70,33 @@ typedef uint16_t       UBaseType_t;
 #endif
 
 //-------------------------------------------------------------------------------------------------
+// Peripheral definitions.
+//-------------------------------------------------------------------------------------------------
+// single core DSP have these peripherals at the same location
+// to run in another core, fix locations
+#define portPIE_VECT_BASE  0x000D00
+#define portCPU_TIM2_BASE  0x000C10
+#define portCPU_TIM2_ISR   0x00001C >> 1
+// IER, IFR register definitions
+extern cregister volatile unsigned int IER;
+extern cregister volatile unsigned int IFR;
+
+//-------------------------------------------------------------------------------------------------
 // Interrupt control macros.
 //-------------------------------------------------------------------------------------------------
-#define portDISABLE_INTERRUPTS()  __asm(" setc INTM")
-#define portENABLE_INTERRUPTS()   __asm(" clrc INTM")
+// example of treating INT4 only as high priority interrupt rebuild (clean+build) is required when
+// changing this value (to force rebuild of porASM.asm)
+#define portDISABLE_INTERRUPTS()  __asm(" SETC INTM")
+#define portENABLE_INTERRUPTS()   __asm(" CLRC INTM")
+
+// 0 to get normal behavior don't enable RTOSINT, DLOGINT
+#define portCRITICAL_INTERRUPT_MASK  0x0000
+
+#if (configUSE_PREEMPTION == 1)
+# define portUSE_PREEMPTION  0x0001
+#else
+# define portUSE_PREEMPTION  0x0000
+#endif
 
 //-------------------------------------------------------------------------------------------------
 // Critical section control macros.
@@ -78,13 +109,46 @@ extern void vPortExitCritical( void );
 //-------------------------------------------------------------------------------------------------
 // Task utilities.
 //-------------------------------------------------------------------------------------------------
-#define portYIELD() do{bYield = 1; __asm(" INTR INT14");}while(0)
-#define portYIELD_FROM_ISR( x )  do{if(x == pdTRUE){bYield = 1; __asm(" OR IFR, #0x2000");}}while(0)
+#define portYIELD_OPERATION()  __asm(" OR IFR, #0x2000")
 
-extern void portTICK_ISR( void );
+#define portYIELD() do{portYIELD_OPERATION();}while(0)
+#define portYIELD_FROM_ISR( x )  do{if(x == pdTRUE){portYIELD_OPERATION();}}while(0)
+
 extern void portRESTORE_FIRST_CONTEXT( void );
 extern void vTaskSwitchContext( void );
-extern volatile uint16_t bYield;
+
+// Functions that should called inside interrupts when using critical
+// interrupts, it enables nesting inside kernel aware interrupts.
+#if (portCRITICAL_INTERRUPT_MASK == 0x0000)
+
+static inline __attribute__((always_inline))
+void portPROLOG_ISR( void )
+{
+  // do nothing
+}
+
+static inline __attribute__((always_inline))
+void portEPILOG_ISR( void )
+{
+  // do nothing
+}
+
+#else
+
+static inline __attribute__((always_inline))
+void portPROLOG_ISR( void )
+{
+  IER &= portCRITICAL_INTERRUPT_MASK;
+  portENABLE_INTERRUPTS();
+}
+
+static inline __attribute__((always_inline))
+void portEPILOG_ISR( void )
+{
+  portDISABLE_INTERRUPTS();
+}
+
+#endif
 
 //-------------------------------------------------------------------------------------------------
 // Hardware specifics.
