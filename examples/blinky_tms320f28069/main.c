@@ -18,21 +18,6 @@ static SemaphoreHandle_t xSemaphore = NULL;
 static StaticSemaphore_t xSemaphoreBuffer;
 
 //-------------------------------------------------------------------------------------------------
-void vApplicationSetupTimerInterrupt( void )
-{
-    // Start the timer than activate timer interrupt to switch into first task.
-    EALLOW;
-    PieVectTable.TINT2 = &portTICK_ISR;
-    EDIS;
-
-    ConfigCpuTimer(&CpuTimer2,
-                   configCPU_CLOCK_HZ / 1000000,  // CPU clock in MHz
-                   1000000 / configTICK_RATE_HZ); // Timer period in uS
-    CpuTimer2Regs.TCR.all = 0x4000;               // Enable interrupt and start timer
-    IER |= M_INT14;
-}
-
-//-------------------------------------------------------------------------------------------------
 static void blueLedToggle(void)
 {
     static uint32_t counter = 0;
